@@ -9,6 +9,7 @@ JP_IT_IP_ADDRESS = '52.62.133.15'
 
 class CheckSimpleDnsClient(unittest.TestCase):
     """
+    Basic function test.
     """
 
     def setUp(self):

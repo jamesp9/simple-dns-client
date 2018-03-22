@@ -31,3 +31,7 @@ class CheckSimpleDnsClient(unittest.TestCase):
         packed_question = self.query_dns.construct_question()
         self.assertEqual(packed_question,
                          b'\x05jp-it\x03net\x02au\x00\x00\x01\x00\x01')
+
+    def tearDown(self):
+        """Close socket to clean up"""
+        self.query_dns.close_socket()
