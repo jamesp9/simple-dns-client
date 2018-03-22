@@ -16,6 +16,7 @@ PORT = 53
 MAX_LABEL_OCTETS = 63
 MAX_NAME_OCTETS = 255
 MAX_OCTETS_FOR_UDP_MESSAGE = 512
+HEADER_SIZE_BYTES = 12
 
 
 class QueryDNS:
@@ -113,10 +114,61 @@ class QueryDNS:
 
         return struct.pack('>{0}sHH'.format(len(qname)), qname, qclass, qtype)
 
+    def receive_response(self):
+        """"""
+        delay = 0.1
+        while True:
+            self.udp_sock.settimeout(delay)
+            try:
+                data = self.udp_sock.recv(MAX_OCTETS_FOR_UDP_MESSAGE)
+            except socket.timeout:
+                delay *= 2  # exponential back off
+                if delay > 2.0:
+                    self.print_output("Delay is more than 2.0 seconds.")
+                    self.udp_sock.close()
+                    sys.exit(3)
+            except Exception as e:
+                self.print_output("A further exception occurred: {}".format(e))
+            else:
+                break
+
+        return data
+
+    def unpack_header_fields(self, response_data):
+        """
+                                        1  1  1  1  1  1
+          0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
+        +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+        |                      ID                       |
+        +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+        |QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE   |
+        +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+        |                    QDCOUNT                    |
+        +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+        |                    ANCOUNT                    |
+        +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+        |                    NSCOUNT                    |
+        +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+        |                    ARCOUNT                    |
+        +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+        """
+        # The header is 6 short integers
+        return struct.unpack('>HHHHHH', response_data[:HEADER_SIZE_BYTES])
+
+    def response_header_id(self):
+        """"""
+        if response_header[0] != self.identifier:
+            print("Transaction ID's do not match", response_header[0], self.identifier)
+            sys.exit(4)
+
+
     def main(self):
         """
         Replace the whole original monolith for now.
         """
+        ########################################################################
+        # Make the request
+        ########################################################################
         self.udp_sock.connect((self.dnsserver, PORT))
 
         self.print_output('Hostname: {0}\nDNS Server: {1}'.format(
@@ -130,61 +182,29 @@ class QueryDNS:
         # Question section
         query_question = self.construct_question()
 
+        # Put the message together and send the query
         self.udp_sock.send(query_header + query_question)
 
-        delay = 0.1
-        while True:
-            self.udp_sock.settimeout(delay)
-            # print("Waiting {0} seconds for a reply".format(delay))
-            try:
-                data = self.udp_sock.recv(MAX_OCTETS_FOR_UDP_MESSAGE)
-            except socket.timeout:
-                delay *= 2  # exponential backoff
-                if delay > 2.0:
-                    # print("Not waiting more than 2 seconds for a reply. Exiting.")
-                    self.print_output("Delay is more than 2.0 seconds.")
-                    self.udp_sock.close()
-                    sys.exit(3)
-            except Exception as e:
-                self.print_output("how did we get here: {}".format(e))
-            else:
-                break
-
-        # Length of reply
-        self.print_output("Bytes recieved: {0}".format(len(data)))
+        ########################################################################
+        # Listen for the response
+        ########################################################################
+        response_data = self.receive_response()
+        self.print_output("Bytes received: {0}".format(len(response_data)))
 
         # Response - Header
-        #                                    1  1  1  1  1  1
-        #      0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
-        #    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-        #    |                      ID                       |
-        #    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-        #    |QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE   |
-        #    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-        #    |                    QDCOUNT                    |
-        #    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-        #    |                    ANCOUNT                    |
-        #    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-        #    |                    NSCOUNT                    |
-        #    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-        #    |                    ARCOUNT                    |
-        #    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-        offset = 12
-        header = struct.unpack('>HHHHHH', data[:offset])  # first 6 short int's (2 bytes)
+        response_header = self.unpack_header_fields(response_data)
         # Response - Header - ID
-        if header[0] != self.identifier:
-            print("Transaction ID's do not match", header[0], self.identifier)
-            sys.exit(4)
+        response_identifier = self.response_header_id(response_header)
         self.print_output("Identifier: {0}".format(self.identifier))
 
         # Response - Header - Flags - RA - Recursion Available
-        ra = header[1] & 0x0080
+        ra = response_header[1] & 0x0080
         if ra == 128:
             ra = 1
         self.print_output("Recursion supported: {0}".format(ra))
 
         # Response - Header - Flags - RCODE - Response Code
-        rcode = header[1] & 0x000F
+        rcode = response_header[1] & 0x000F
         if rcode == 0:
             rcode_str = "No Error"
         elif rcode == 1:
@@ -201,23 +221,22 @@ class QueryDNS:
             rcode_str = "Reserved for furture use"
         self.print_output("Query Status: {0} ({1})".format(rcode, rcode_str))
 
-        ancount = header[3]
-        # Response - Header - ANCOUNT - Answer Count
-        self.print_output("Number of Answers: {0}".format(ancount))
+        answer_count = response_header[3]
+        self.print_output("Number of Answers: {0}".format(answer_count))
 
         # Response - Question - QNAME
         while True:
-            lo = data[offset]  # Length octet
+            lo = response_data[offset]  # Length octet
             offset += 1
             if lo == 0:
                 break
 
-            label = data[offset:offset + lo]
+            label = response_data[offset:offset + lo]
             # print(lo, label)
             offset += lo
 
         # Response - Question - QTYPE
-        qtype = data[offset: offset + 2]
+        qtype = response_data[offset: offset + 2]
         offset += 2
         # print("QTYPE: {0}".format(struct.unpack('>H' , qtype)[0]))
 
@@ -228,7 +247,7 @@ class QueryDNS:
 
         # Response - Resource Record - Answers
         add_cnt = 0
-        for an in range(1, ancount + 1):
+        for an in range(1, answer_count + 1):
             # Response - Resource Record - NAME
             rrname = data[offset: offset + 2]
             rrname = struct.unpack('>H', rrname)[0]
