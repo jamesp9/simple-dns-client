@@ -1,5 +1,5 @@
 """
-Based on information from:
+Basic DNS client based on information from:
 RFC 1035 - Domain names - Implementation and Specification
 """
 import random
@@ -16,6 +16,7 @@ HEADER_SIZE_BYTES = 12
 
 class QueryDNS:
     """
+    Class to Query DNS with UDP packets.
     """
     OUTPUT = ''
 
