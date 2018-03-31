@@ -1,6 +1,7 @@
 """
 Basic DNS client based on information from:
 RFC 1035 - Domain names - Implementation and Specification
+https://www.ietf.org/rfc/rfc1035.txt
 """
 import random
 import socket
